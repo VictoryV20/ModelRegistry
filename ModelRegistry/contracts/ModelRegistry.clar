@@ -363,4 +363,65 @@
     (var-get platform-fee)
 )
 
+;; =========================================================================
+;; The final code snippet: Purchase a listed AI model (35+ lines)
+;; =========================================================================
+;; This function allows a user to buy an AI model that is listed for sale.
+;; It performs several security checks including:
+;; 1. The contract must not be paused.
+;; 2. The model must exist and be listed for sale.
+;; 3. The buyer must have enough funds.
+;; 4. The buyer cannot be the current owner.
+;; 5. Calculates the platform fee, splits the payment, and transfers funds.
+;; 6. Updates the ownership, resets prices, and delists the model post-purchase.
+(define-public (purchase-model (model-id uint))
+    (let
+        (
+            ;; Retrieve the model data, fail if not found
+            (model (unwrap! (map-get? models { model-id: model-id }) err-model-not-found))
+            (seller (get owner model))
+            (price (get price model))
+            (is-listed (get listed model))
+            (fee (calculate-fee price))
+            (net-amount (- price fee))
+        )
+        ;; Security check: ensure the contract is not paused
+        (try! (check-not-paused))
+        
+        ;; Security check: Ensure the model is actually listed for sale
+        (asserts! is-listed err-not-listed)
+        
+        ;; Security check: Ensure the buyer is not already the owner
+        (asserts! (not (is-eq seller tx-sender)) err-not-owner)
+        
+        ;; Action: Transfer the net STX from the buyer to the seller
+        (try! (stx-transfer? net-amount tx-sender seller))
+        
+        ;; Action: Transfer the platform fee to the contract owner
+        (if (> fee u0)
+            (try! (stx-transfer? fee tx-sender contract-owner))
+            false
+        )
+        
+        ;; Update the model data in the map:
+        ;; - Change the owner to the buyer (tx-sender)
+        ;; - Automatically delist the model so it isn't immediately for sale again
+        ;; - Reset the price to 0 for safety
+        (map-set models
+            { model-id: model-id }
+            (merge model 
+                { 
+                    owner: tx-sender, 
+                    listed: false, 
+                    price: u0 
+                }
+            )
+        )
+        
+        ;; Emit event for the purchase
+        (print { event: "purchase-model", model-id: model-id, buyer: tx-sender, price: price })
+        (ok true)
+    )
+)
+
 
